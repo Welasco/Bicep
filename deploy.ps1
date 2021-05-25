@@ -1,0 +1,1 @@
+az deployment sub create -n 'Finlocker' -l 'westus' -f main.bicep
