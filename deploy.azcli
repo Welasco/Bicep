@@ -1,0 +1,4 @@
+az deployment sub create -n 'FinDep' -l 'westus' -f main.bicep
+
+az group delete -g 'finlocker-RG' -y
+az deployment sub delete -n 'FinDep'

@@ -1,38 +1,40 @@
 targetScope = 'subscription'
-var rgname = 'HUB-customer'
-var rgnameprefix = '${rgname}-RG'
+var baseName = 'finlocker'
+var rgName = '${baseName}-RG'
+var acrName = '${baseName}acr'
+
 module rg 'modules/resource-group/rg.bicep' = {
-  name: rgnameprefix
+  name: rgName
   params: {
-    rgName: rgnameprefix
+    rgName: rgName
     location: deployment().location
   }
 }
 
 module vnet 'modules/vnet/vnet.bicep' = {
   scope: resourceGroup(rg.name)
-  name: 'vnetdeploy'
+  name: 'hub-VNet'
   params: {
     vnetAddressSpace: {
         addressPrefixes: [
         '10.0.0.0/16'
       ]
     }
+    vnetNamePrefix: 'hub'
     subnets: [
       {
-        name: 'default'
         properties: {
           addressPrefix: '10.0.0.0/24'
         }
+        name: 'default'
       }
       {
-        name: 'AzureFirewallSubnet'
         properties: {
           addressPrefix: '10.0.1.0/24'
         }
+        name: 'AzureFirewallSubnet'
       }
     ]
-    vnetName: 'customer'
   }
   dependsOn: [
     rg
@@ -49,31 +51,32 @@ module routetable 'modules/vnet/routetable.bicep' = {
 
 module vnetspoke 'modules/vnet/vnet.bicep' = {
   scope: resourceGroup(rg.name)
-  name: 'vnetspokedeploy'
+  name: 'spoke-VNet'
   params: {
     vnetAddressSpace: {
         addressPrefixes: [
         '10.1.0.0/16'
       ]
     }
+    vnetNamePrefix: 'spoke'
     subnets: [
       {
-        name: 'default'
         properties: {
           addressPrefix: '10.1.0.0/24'
+          privateEndpointNetworkPolicies: 'Disabled'
         }
+        name: 'default'
       }
       {
-        name: 'AKS'
         properties: {
-          addressPrefix: '10.1.1.0/24'
+          addressPrefix: '10.1.2.0/23'
           routeTable: {
             id: routetable.outputs.routetableID
           }          
         }
+        name: 'AKS'
       }
     ]
-    vnetName: 'customerspoke'
   }
   dependsOn: [
     rg
@@ -129,7 +132,7 @@ module publicipfw 'modules/vnet/publicip.bicep' = {
 
 resource subnetfw 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
   scope: resourceGroup(rg.name)
-  name: 'customer-VNET/AzureFirewallSubnet'
+  name: '${vnet.name}/AzureFirewallSubnet'
   parent: vnet
 }
 
@@ -137,7 +140,7 @@ module azfirewall 'modules/vnet/firewall.bicep' = {
   scope: resourceGroup(rg.name)
   name: 'azfirewall'
   params: {
-    fwname: 'azfirwall-customer'    
+    fwname: 'azfirewall'    
     fwipConfigurations: [
       {
         name: 'fwPublicIP'
@@ -346,5 +349,59 @@ module routetableroutes 'modules/vnet/routetableroutes.bicep' = {
       nextHopIpAddress: azfirewall.outputs.fwPrivateIP
       addressPrefix: '0.0.0.0/0'      
     }
+  }
+}
+
+module acrDeploy 'modules/acr/acr.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'acrDeploy'
+  params: {
+    acrName: acrName
+  }
+}
+
+resource subnetacrpvt 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
+  scope: resourceGroup(rg.name)
+  name: '${vnetspoke.name}/default'
+  parent: vnet
+}
+
+module acrpvtEndpoint 'modules/vnet/privateendpoint.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'acrpvtEndpoint'
+  params: {
+    privateEndpointName: 'acrpvtEndpoint'
+    privateLinkServiceConnections: [
+      {
+        name: 'acrpvtEndpointConnection'
+        properties: {
+          privateLinkServiceId: acrDeploy.outputs.acrid
+          groupIds: [
+            'registry'
+          ]
+        }
+      }
+    ]
+    subnetid: {
+      id: subnetacrpvt.id
+    }
+  }
+}
+
+module privateDNS 'modules/vnet/privatedns.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'privateDNS'
+  params: {
+    privateDNSZoneName: 'privatelink.azurecr.io'
+    privateEndpointName: acrpvtEndpoint.outputs.privateEndpointName
+    virtualNetworkid: vnetspoke.outputs.vnetId
+  }
+}
+
+module akslaworkspace 'modules/laworkspace/la.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'akslaworkspace'
+  params: {
+    basename: baseName
   }
 }
