@@ -39,6 +39,14 @@ module vnet 'modules/vnet/vnet.bicep' = {
   ]
 }
 
+module routetable 'modules/vnet/routetable.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aks-udr'
+  params: {
+    rtName: 'aks-udr'
+  } 
+}
+
 module vnetspoke 'modules/vnet/vnet.bicep' = {
   scope: resourceGroup(rg.name)
   name: 'vnetspokedeploy'
@@ -53,6 +61,15 @@ module vnetspoke 'modules/vnet/vnet.bicep' = {
         name: 'default'
         properties: {
           addressPrefix: '10.1.0.0/24'
+        }
+      }
+      {
+        name: 'AKS'
+        properties: {
+          addressPrefix: '10.1.1.0/24'
+          routeTable: {
+            id: routetable.outputs.routetableID
+          }          
         }
       }
     ]
@@ -316,4 +333,18 @@ module azfirewall 'modules/vnet/firewall.bicep' = {
       }      
     ]
   } 
+}
+
+module routetableroutes 'modules/vnet/routetableroutes.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aks-udr-route'
+  params: {
+    routetableName: 'aks-udr'
+    routeName: 'aks-udr-route'
+    properties: {
+      nextHopType: 'VirtualAppliance'
+      nextHopIpAddress: azfirewall.outputs.fwPrivateIP
+      addressPrefix: '0.0.0.0/0'      
+    }
+  }
 }

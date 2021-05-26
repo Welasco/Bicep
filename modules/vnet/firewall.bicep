@@ -13,3 +13,5 @@ resource firewall 'Microsoft.Network/azureFirewalls@2020-11-01' = {
     natRuleCollections: fwnatRuleCollections
   }
 }
+output fwPrivateIP string = firewall.properties.ipConfigurations[0].properties.privateIPAddress
+output fwName string = firewall.name
