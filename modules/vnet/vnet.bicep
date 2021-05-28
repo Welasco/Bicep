@@ -5,10 +5,11 @@ param vnetAddressSpace object = {
 }
 param vnetNamePrefix string
 param subnets array
+param location string = resourceGroup().location
 
 resource vnet 'Microsoft.Network/virtualNetworks@2020-11-01' = {
   name: '${vnetNamePrefix}-VNet'
-  location: resourceGroup().location
+  location: location
   properties: {
     addressSpace: vnetAddressSpace
     subnets: subnets

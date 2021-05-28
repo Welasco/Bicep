@@ -11,7 +11,7 @@ module rg 'modules/resource-group/rg.bicep' = {
   }
 }
 
-module vnet 'modules/vnet/vnet.bicep' = {
+module vnethub 'modules/vnet/vnet.bicep' = {
   scope: resourceGroup(rg.name)
   name: 'hub-VNet'
   params: {
@@ -70,6 +70,7 @@ module vnetspoke 'modules/vnet/vnet.bicep' = {
       {
         properties: {
           addressPrefix: '10.1.2.0/23'
+          privateEndpointNetworkPolicies: 'Disabled'
           routeTable: {
             id: routetable.outputs.routetableID
           }          
@@ -88,7 +89,7 @@ module vnetpeering 'modules/vnet/vnetpeering.bicep' = {
   name: 'vnetpeering'
   params: {
     peeringName: 'HUB-to-Spoke'
-    vnetName: vnet.outputs.vnetName
+    vnetName: vnethub.outputs.vnetName
     properties: {
       allowVirtualNetworkAccess: true
       allowForwardedTraffic: true
@@ -109,7 +110,7 @@ module vnetpeeringspoke 'modules/vnet/vnetpeering.bicep' = {
       allowVirtualNetworkAccess: true
       allowForwardedTraffic: true
       remoteVirtualNetwork: {
-        id: vnet.outputs.vnetId
+        id: vnethub.outputs.vnetId
       }
     }    
   }
@@ -132,8 +133,8 @@ module publicipfw 'modules/vnet/publicip.bicep' = {
 
 resource subnetfw 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
   scope: resourceGroup(rg.name)
-  name: '${vnet.name}/AzureFirewallSubnet'
-  parent: vnet
+  name: '${vnethub.name}/AzureFirewallSubnet'
+  parent: vnethub
 }
 
 module azfirewall 'modules/vnet/firewall.bicep' = {
@@ -363,7 +364,7 @@ module acrDeploy 'modules/acr/acr.bicep' = {
 resource subnetacrpvt 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
   scope: resourceGroup(rg.name)
   name: '${vnetspoke.name}/default'
-  parent: vnet
+  parent: vnetspoke
 }
 
 module acrpvtEndpoint 'modules/vnet/privateendpoint.bicep' = {
@@ -388,13 +389,22 @@ module acrpvtEndpoint 'modules/vnet/privateendpoint.bicep' = {
   }
 }
 
+module privatednsACRZone 'modules/vnet/privatednszone.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'privatednsACRZone'
+  params: {
+    privateDNSZoneName: 'privatelink.azurecr.io'
+  }
+}
+
 module privateDNS 'modules/vnet/privatedns.bicep' = {
   scope: resourceGroup(rg.name)
   name: 'privateDNS'
   params: {
-    privateDNSZoneName: 'privatelink.azurecr.io'
+    privateDNSZoneName: privatednsACRZone.outputs.privateDNSZoneName
     privateEndpointName: acrpvtEndpoint.outputs.privateEndpointName
     virtualNetworkid: vnetspoke.outputs.vnetId
+    privateDNSZoneId: privatednsACRZone.outputs.privateDNSZoneId
   }
 }
 
@@ -403,5 +413,51 @@ module akslaworkspace 'modules/laworkspace/la.bicep' = {
   name: 'akslaworkspace'
   params: {
     basename: baseName
+  }
+}
+
+resource subnetaks 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
+  scope: resourceGroup(rg.name)
+  name: '${vnetspoke.name}/AKS'
+  parent: vnetspoke
+}
+
+module privatednsAKSZone 'modules/vnet/privatednszone.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'privatednsAKSZone'
+  params: {
+    privateDNSZoneName: 'privatelink.${deployment().location}.azmk8s.io'
+  }
+}
+
+module aksIdentity 'modules/Identity/userassigned.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aksIdentity'
+  params: {
+    basename: baseName
+  }
+}
+
+resource pvtdnsAKSZone 'Microsoft.Network/dnsZones@2018-05-01' existing = {
+  name: 'privatelink.${deployment().location}.azmk8s.io'
+  scope: resourceGroup(rg.name)
+}
+
+module aksCluster 'modules/aks/privateaks.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aksCluster'
+  params: {
+    aadGroupdIds: [
+      'e822cf30-7f5e-4968-a215-5cc48d538580'
+    ]
+    basename: baseName
+    logworkspaceid: akslaworkspace.outputs.laworkspaceId
+    privateDNSZoneId: privatednsAKSZone.outputs.privateDNSZoneId
+    subnetId: subnetaks.id
+    identity: {
+      '${aksIdentity.outputs.identityid}' : {}
+    }
+    msiresourceId: aksIdentity.outputs.identityid
+    principalId: aksIdentity.outputs.principalId
   }
 }

@@ -2,3 +2,19 @@ az deployment sub create -n 'FinDep' -l 'westus' -f main.bicep
 
 az group delete -g 'finlocker-RG' -y
 az deployment sub delete -n 'FinDep'
+
+#az aks create --resource-group 'finlocker-RG' --name 'testakscluster' \
+#--node-count 2 --vm-set-type 'VirtualMachineScaleSets' --node-vm-size 'Standard_D4s_v3' \
+#--kubernetes-version 1.19.9 --location 'westus' --load-balancer-sku 'Standard' \
+#--outbound-type 'userDefinedRouting' --enable-private-cluster --enable-cluster-autoscaler \
+#--enable-managed-identity --assign-identity '/subscriptions/12bb4e89-4f7a-41e0-a38f-b22f079248b4/resourceGroups/finlocker-RG/providers/Microsoft.ManagedIdentity/userAssignedIdentities/finlockeridentity' \
+#--enable-pod-identity --min-count 2 --max-count 5 --max-pods 50 \
+#--network-plugin azure --vnet-subnet-id '/subscriptions/12bb4e89-4f7a-41e0-a38f-b22f079248b4/resourceGroups/finlocker-RG/providers/Microsoft.Network/virtualNetworks/spoke-VNet/subnets/AKS' \
+#--docker-bridge-address '172.17.0.1/16' --dns-service-ip '10.0.0.10' --service-cidr '10.0.0.0/16' \
+#--attach-acr 'finlockeracr' --generate-ssh-keys
+
+
+az aks create -n <private-cluster-name> -g <private-cluster-resource-group> --load-balancer-sku standard --enable-private-cluster --enable-managed-identity --assign-identity <ResourceId> --private-dns-zone <custom private dns zone ResourceId> --fqdn-subdomain <subdomain-name>
+
+
+az identity show --name finlockeridentity --resource-group finlocker-RG 

@@ -1,15 +1,10 @@
 param privateDNSZoneName string
 param privateEndpointName string
 param virtualNetworkid string
-
-resource privateDNSZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: privateDNSZoneName
-  location: 'global'
-
-}
+param privateDNSZoneId string
 
 resource virtualNetworkLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
-  name: '${privateDNSZone.name}/${privateDNSZone.name}-link'
+  name: '${privateDNSZoneName}/${privateDNSZoneName}-link'
   location: 'global'
   properties: {
     registrationEnabled: false
@@ -26,7 +21,7 @@ resource privateDNSZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneG
       {
         name: 'config1'
         properties: {
-          privateDnsZoneId: privateDNSZone.id
+          privateDnsZoneId: privateDNSZoneId
         }
       }
     ]
