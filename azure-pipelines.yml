@@ -20,7 +20,7 @@ steps:
 
 - task: AzureCLI@2
   inputs:
-    azureSubscription: 'Azure CXP FTA Internal Subscription ssarwa (12bb4e89-4f7a-41e0-a38f-b22f079248b4)'
-    scriptType: 'bash'
+    azureSubscription: 'Azure CXP FTA Internal Subscription ssarwa(12bb4e89-4f7a-41e0-a38f-b22f079248b4)'
+    scriptType: 'batch'
     scriptLocation: 'inlineScript'
     inlineScript: 'az deployment sub create -n ''FinDep'' -l ''westus'' -f main.bicep'
