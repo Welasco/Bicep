@@ -1,0 +1,170 @@
+
+
+#A. Prerequisites:
+1.	Create a new subnet (Not always needed. If you do use this, there are more pre-req's like adding the route for the new subnet in the client to site vpn routes, Azure route table, allow outbound traffic, etc.)
+2.	Create the resource group
+3.	Create the acr and put it in the resource group
+4.	Create private endpoint for ACR
+5.	Add zone to DNS
+6.	Create keyvault
+7.	Create private endpoint for keyvault (don't add to dns… yet)
+8.	Create a route table for the subnet (if using a new subnet)
+9.	Create a managed identity for the cluster (and place in new RG)
+10.	Register features in subscription (if needed)
+a.	Example
+az feature register --name EnablePodIdentityPreview --namespace Microsoft.ContainerService
+az provider register --namespace 'Microsoft.ContainerInstance'
+az provider register --namespace 'Microsoft.ContainerService'
+ 
+ 
+ 
+#B. Cluster build script:
+1.	Use the Azure CLI script to build cluster
+a.	Example
+Az aks create --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME 
+--node-count 2 --vm-set-type VirtualMachineScaleSets 
+--node-vm-size Standard_D4s_v3 --kubernetes-version 1.19.9 
+--location centralus --load-balancer-sku Standard 
+--outbound-type userDefinedRouting --enable-private-cluster 
+--enable-cluster-autoscaler --enable-managed-identity 
+--assign-identity $IDENTITY --enable-pod-identity 
+--min-count 2 --max-count 5 --max-pods 50 --network-plugin azure 
+--vnet-subnet-id $SUBNET-ID --docker-bridge-address 172.17.0.1/16 
+--dns-service-ip 10.0.0.10 --service-cidr 10.0.0.0/16 
+--enable-addons monitoring --attach-acr $ACRNAME --generate-ssh-keys
+ 
+ 
+#C. Post Build Req's
+1.	Add the private cluster DNS Zone to Active Directory & A Record (Haven't moved to Azure Private DNS yet)
+2.	Add an entry for the new private zone to your local Host file on your laptop so that it can communicate while connected to the VPN.
+3.	Create an internal load balancer in the cluster by logging into the cluster (az aks get-credentials) and applying an internal-lb.yaml
+4.	If there isn't a load balancer showing in the Azure portal, create one and place it in the node resource group
+a.	Make sure the front end IP is reflecting the same as the cluster load balancer
+b.	Make sure the back end IP has the node IP's added
+0.	Push public key to VMSS
+a.	Configure virtual machine scale set-based AKS clusters for SSH access
+a.	To configure your virtual machine scale set-based for SSH access, find the name of your cluster's VM scale set and add your SSH public key to that scale set.
+ 
+CLUSTER_RESOURCE_GROUP=$(az aks show --resource-group myResourceGroup --name myAKSCluster --query nodeResourceGroup -o tsv)
+SCALE_SET_NAME=$(az vmss list --resource-group $CLUSTER_RESOURCE_GROUP --query [0].name -o tsv)
+ 
+ 
+ 
+#D. Identities
+1.	Assign permission for the managed identity (Identity from step #A-9)
+•	Az role assignment create --role "Reader" --assignee $IDENTITY_CLIENT_ID --scope $NODES_RESOURCE_ID
+2.	Create a pod identity
+•	Az aks pod-identity add --resource-group myResourceGroup --cluster-name myAKSCluster --namespace $POD_IDENTITY_NAMESPACE --name $POD_IDENTITY_NAME --identity-resource-id $IDENTITY_RESOURCE_ID
+•	Finish the permissions for the identity.
+ 
+ORIGINAL QUERY:
+VAULT_RESOURCE_GROUP=contosoResourceGroup
+NODE_RESOURCE_GROUP=contosoResourceGroup
+ 
+az role assignment create --role "Managed Identity Operator" --assignee $clientId --scope /subscriptions/<SUBID>/resourcegroups/$VAULT_RESOURCE_GROUP
+ 
+az role assignment create --role "Managed Identity Operator" --assignee $clientId --scope /subscriptions/<SUBID>/resourcegroups/$NODE_RESOURCE_GROUP
+ 
+az role assignment create --role "Virtual Machine Contributor" --assignee $clientId --scope /subscriptions/<SUBID>/resourcegroups/$NODE_RESOURCE_GROUP
+ 
+az keyvault set-policy -n contosoKeyVault5 --secret-permissions get --spn $clientId
+az keyvault set-policy -n contosoKeyVault5 --key-permissions get --spn $clientId
+az keyvault set-policy -n contosoKeyVault5 --certificate-permissions get --spn $clientId
+ 
+ 
+#E. DevOps Agent
+1.	Build an Ubuntu Linux server
+a.	Standard D2s v3 (2 vcpus, 8GiB memory)
+b.	Standard disk
+c.	No public IP
+d.	Specify the local admin, will need this to login
+e.	Install Dependencies 
+Install Azure CLI - https://docs.microsoft.com/en-us/cli/azure/install-azure-cli-linux?pivots=apt
+Install Helm - https://helm.sh/docs/intro/install/
+Install Docker - https://docs.docker.com/engine/install/ubuntu/
+Install Azure Kubectl - First login to the Azure CLI and run "az aks install-cli" - https://docs.microsoft.com/en-us/azure/aks/kubernetes-walkthrough
+2.	Follow this article (You can download the agent from the portal, and then use SCP to transfer the file to the linux devops server)
+a.	GitHub - ganrad/Az-DevOps-Agent-On-AKS: Build and deploy Azure DevOps Pipeline agent in a container on Azure Kubernetes Service. Elastically scale the DevOps build infrastructure.
+0.	Run the agent as a service (make sure the folders aren't stored on the local root user home directory)
+a.	Use this article in the section (run as a systemd service)- Deploy an Azure Pipelines agent on Linux - Azure Pipelines | Microsoft Docs
+ 
+#F. Ingress Controller
+1.	Referenced Documentation - Ingress controller on internal network - Azure Kubernetes Service | Microsoft Docs
+2.	Create this yaml on a VM with helm installed and name it 'internal-ingress.yaml'
+ 
+ 
+controller:
+  service:
+    loadBalancerIP: 10.10.10.251 (This needs to be from the internal VNET)
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+ 
+3.	#Login to cluster
+Az aks get-credentials --resource-group $CLUSTER_RG --name $CLUSTERNAME --admin
+ 
+4.	# Create a namespace for your ingress resources
+kubectl create namespace ingress-basic
+ 
+5.	# Add the ingress-nginx repository
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+ 
+6.	# Use Helm to deploy an NGINX ingress controller
+helm install nginx-ingress ingress-nginx/ingress-nginx \
+    --namespace ingress-basic \
+    -f internal-ingress.yaml \
+    --set controller.replicaCount=2 \
+    --set controller.nodeSelector."beta\.kubernetes\.io/os"=linux \
+    --set defaultBackend.nodeSelector."beta\.kubernetes\.io/os"=linux \
+    --set controller.admissionWebhooks.patch.nodeSelector."beta\.kubernetes\.io/os"=linux
+ 
+#G. Ingress Routes
+BELOW IS AN EXAMPLE YAML OF INGRESS ROUTES.  THIS IS A DIFFERENT RESOURCE THAN THE NGINX CONTROLLER.  EVERY NEW ROUTE NEEDS TO BE ADDED TO THIS CONFIG.
+ 
+Things to pay attention to 
+•	You can deploy multiple ingress-route resources to the same namespaces, but also keep in mind namespace 1 can't read namespace 2's routes.  Each namespace needs an ingress route.
+•	Name (can be whatever you need it to be)
+•	Rewrite-target (references the place holders for regex)
+•	Use-regex (enables regex on the paths)
+•	Methods (Allowed-methods)
+•	HOST (needs to match the URL)
+•	Service>Name (needs to match the service name in the cluster)
+ 
+ 
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flapi-devg3-routes
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS, HEAD, DELETE, PATCH"
+spec:
+  rules:
+    - host: flapi.devg3.finlocker.com
+      http:
+        paths:
+          - path: /creditreportingapi(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service: 
+                name: credit-report-api
+                port: 
+                  number: 80
+          - path: /verificationapi(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service: 
+                name: verification-api
+                port: 
+                  number: 80
+          - path: /fda-customer(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service: 
+                name: fda-customer-api
+                port: 
+                  number: 80
+

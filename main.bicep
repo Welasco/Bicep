@@ -1,38 +1,40 @@
 targetScope = 'subscription'
-var rgname = 'HUB-customer'
-var rgnameprefix = '${rgname}-RG'
+var baseName = 'finlocker'
+var rgName = '${baseName}-RG'
+var acrName = '${baseName}acr'
+
 module rg 'modules/resource-group/rg.bicep' = {
-  name: rgnameprefix
+  name: rgName
   params: {
-    rgName: rgnameprefix
+    rgName: rgName
     location: deployment().location
   }
 }
 
-module vnet 'modules/vnet/vnet.bicep' = {
+module vnethub 'modules/vnet/vnet.bicep' = {
   scope: resourceGroup(rg.name)
-  name: 'vnetdeploy'
+  name: 'hub-VNet'
   params: {
     vnetAddressSpace: {
         addressPrefixes: [
         '10.0.0.0/16'
       ]
     }
+    vnetNamePrefix: 'hub'
     subnets: [
       {
-        name: 'default'
         properties: {
           addressPrefix: '10.0.0.0/24'
         }
+        name: 'default'
       }
       {
-        name: 'AzureFirewallSubnet'
         properties: {
           addressPrefix: '10.0.1.0/24'
         }
+        name: 'AzureFirewallSubnet'
       }
     ]
-    vnetName: 'customer'
   }
   dependsOn: [
     rg
@@ -49,31 +51,33 @@ module routetable 'modules/vnet/routetable.bicep' = {
 
 module vnetspoke 'modules/vnet/vnet.bicep' = {
   scope: resourceGroup(rg.name)
-  name: 'vnetspokedeploy'
+  name: 'spoke-VNet'
   params: {
     vnetAddressSpace: {
         addressPrefixes: [
         '10.1.0.0/16'
       ]
     }
+    vnetNamePrefix: 'spoke'
     subnets: [
       {
-        name: 'default'
         properties: {
           addressPrefix: '10.1.0.0/24'
+          privateEndpointNetworkPolicies: 'Disabled'
         }
+        name: 'default'
       }
       {
-        name: 'AKS'
         properties: {
-          addressPrefix: '10.1.1.0/24'
+          addressPrefix: '10.1.2.0/23'
+          privateEndpointNetworkPolicies: 'Disabled'
           routeTable: {
             id: routetable.outputs.routetableID
           }          
         }
+        name: 'AKS'
       }
     ]
-    vnetName: 'customerspoke'
   }
   dependsOn: [
     rg
@@ -85,7 +89,7 @@ module vnetpeering 'modules/vnet/vnetpeering.bicep' = {
   name: 'vnetpeering'
   params: {
     peeringName: 'HUB-to-Spoke'
-    vnetName: vnet.outputs.vnetName
+    vnetName: vnethub.outputs.vnetName
     properties: {
       allowVirtualNetworkAccess: true
       allowForwardedTraffic: true
@@ -106,7 +110,7 @@ module vnetpeeringspoke 'modules/vnet/vnetpeering.bicep' = {
       allowVirtualNetworkAccess: true
       allowForwardedTraffic: true
       remoteVirtualNetwork: {
-        id: vnet.outputs.vnetId
+        id: vnethub.outputs.vnetId
       }
     }    
   }
@@ -129,15 +133,15 @@ module publicipfw 'modules/vnet/publicip.bicep' = {
 
 resource subnetfw 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
   scope: resourceGroup(rg.name)
-  name: 'customer-VNET/AzureFirewallSubnet'
-  parent: vnet
+  name: '${vnethub.name}/AzureFirewallSubnet'
+  parent: vnethub
 }
 
 module azfirewall 'modules/vnet/firewall.bicep' = {
   scope: resourceGroup(rg.name)
   name: 'azfirewall'
   params: {
-    fwname: 'azfirwall-customer'    
+    fwname: 'azfirewall'    
     fwipConfigurations: [
       {
         name: 'fwPublicIP'
@@ -346,5 +350,114 @@ module routetableroutes 'modules/vnet/routetableroutes.bicep' = {
       nextHopIpAddress: azfirewall.outputs.fwPrivateIP
       addressPrefix: '0.0.0.0/0'      
     }
+  }
+}
+
+module acrDeploy 'modules/acr/acr.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'acrDeploy'
+  params: {
+    acrName: acrName
+  }
+}
+
+resource subnetacrpvt 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
+  scope: resourceGroup(rg.name)
+  name: '${vnetspoke.name}/default'
+  parent: vnetspoke
+}
+
+module acrpvtEndpoint 'modules/vnet/privateendpoint.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'acrpvtEndpoint'
+  params: {
+    privateEndpointName: 'acrpvtEndpoint'
+    privateLinkServiceConnections: [
+      {
+        name: 'acrpvtEndpointConnection'
+        properties: {
+          privateLinkServiceId: acrDeploy.outputs.acrid
+          groupIds: [
+            'registry'
+          ]
+        }
+      }
+    ]
+    subnetid: {
+      id: subnetacrpvt.id
+    }
+  }
+}
+
+module privatednsACRZone 'modules/vnet/privatednszone.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'privatednsACRZone'
+  params: {
+    privateDNSZoneName: 'privatelink.azurecr.io'
+  }
+}
+
+module privateDNS 'modules/vnet/privatedns.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'privateDNS'
+  params: {
+    privateDNSZoneName: privatednsACRZone.outputs.privateDNSZoneName
+    privateEndpointName: acrpvtEndpoint.outputs.privateEndpointName
+    virtualNetworkid: vnetspoke.outputs.vnetId
+    privateDNSZoneId: privatednsACRZone.outputs.privateDNSZoneId
+  }
+}
+
+module akslaworkspace 'modules/laworkspace/la.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'akslaworkspace'
+  params: {
+    basename: baseName
+  }
+}
+
+resource subnetaks 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
+  scope: resourceGroup(rg.name)
+  name: '${vnetspoke.name}/AKS'
+  parent: vnetspoke
+}
+
+module privatednsAKSZone 'modules/vnet/privatednszone.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'privatednsAKSZone'
+  params: {
+    privateDNSZoneName: 'privatelink.${deployment().location}.azmk8s.io'
+  }
+}
+
+module aksIdentity 'modules/Identity/userassigned.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aksIdentity'
+  params: {
+    basename: baseName
+  }
+}
+
+resource pvtdnsAKSZone 'Microsoft.Network/dnsZones@2018-05-01' existing = {
+  name: 'privatelink.${deployment().location}.azmk8s.io'
+  scope: resourceGroup(rg.name)
+}
+
+module aksCluster 'modules/aks/privateaks.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aksCluster'
+  params: {
+    aadGroupdIds: [
+      'e822cf30-7f5e-4968-a215-5cc48d538580'
+    ]
+    basename: baseName
+    logworkspaceid: akslaworkspace.outputs.laworkspaceId
+    privateDNSZoneId: privatednsAKSZone.outputs.privateDNSZoneId
+    subnetId: subnetaks.id
+    identity: {
+      '${aksIdentity.outputs.identityid}' : {}
+    }
+    msiresourceId: aksIdentity.outputs.identityid
+    principalId: aksIdentity.outputs.principalId
   }
 }
