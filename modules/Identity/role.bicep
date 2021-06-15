@@ -7,6 +7,6 @@ resource role_assignment 'Microsoft.Authorization/roleAssignments@2020-04-01-pre
   properties: {
     principalId: principalId
     //delegatedManagedIdentityResourceId: msiResourceId
-    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', roleGuid) //Private DNS Zone Contributor
+    roleDefinitionId: resourceId('Microsoft.Authorization/roleDefinitions', roleGuid)
   }
 }
