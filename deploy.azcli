@@ -1,5 +1,8 @@
+# Create Base64 script value
+cat script.sh | base64 >> script64.txt
+
 # Create / Update the deployment
-az deployment sub create -n 'FinDep' -l 'westus' -f main.bicep
+az deployment sub create -n 'FinDep' -l 'westus' -f main.bicep --parameters script64='...base64convertedfile value...'
 
 # Attach ACR
 az aks update -n finlockeraks -g finlocker-RG --attach-acr finlockeracr

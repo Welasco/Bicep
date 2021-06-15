@@ -459,6 +459,16 @@ module privatednsAKSZone 'modules/vnet/privatednszone.bicep' = {
   }
 }
 
+module aksHubLink 'modules/vnet/privatdnslink.bicep' = {
+  scope: resourceGroup(rg.name)
+  name: 'aksHubLink'
+  params: {
+    privateDnsZoneName: privatednsAKSZone.outputs.privateDNSZoneName
+    vnetId: vnethub.outputs.vnetId
+  }
+  
+}
+
 module aksIdentity 'modules/Identity/userassigned.bicep' = {
   scope: resourceGroup(rg.name)
   name: 'aksIdentity'
