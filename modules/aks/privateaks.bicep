@@ -4,7 +4,6 @@ param logworkspaceid string
 param privateDNSZoneId string
 param subnetId string
 param identity object
-param msiresourceId string
 param principalId string
 
 resource aksCluster 'Microsoft.ContainerService/managedClusters@2021-03-01' = {
@@ -69,7 +68,6 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2021-03-01' = {
 module aksPvtDNSContrib '../Identity/role.bicep' = {
   name: 'aksPvtDNSContrib'
   params: {
-    msiResourceId: msiresourceId
     principalId: principalId
     roleGuid: 'b12aa53e-6015-4669-85d0-8515ebb3ae7f' //Private DNS Zone Contributor
   }
@@ -78,7 +76,6 @@ module aksPvtDNSContrib '../Identity/role.bicep' = {
 module aksPvtNetworkContrib '../Identity/role.bicep' = {
   name: 'aksPvtNetworkContrib'
   params: {
-    msiResourceId: msiresourceId
     principalId: principalId
     roleGuid: '4d97b98b-1d4f-4787-a291-c67834d212e7' //Network Contributor
   }

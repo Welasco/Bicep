@@ -1,15 +1,18 @@
+baseline='Contoso'
+location='westus'
+
 # Create Base64 script value
 cat script.sh | base64 >> script64.txt
 
 # Create / Update the deployment
-az deployment sub create -n 'FinDep' -l 'westus' -f main.bicep --parameters script64='...base64convertedfile value...'
+az deployment sub create -n $baseline'Dep' -l $location -f main.bicep --parameters script64='...base64convertedfile value...'
 
 # Attach ACR
-az aks update -n finlockeraks -g finlocker-RG --attach-acr finlockeracr
+az aks update -n $baseline'aks' -g $baseline'-RG' --attach-acr 'qo4d2vcitdpwcacr'
 
 # Get AKS Credentials
-az aks get-credentials -n finlockeraks -g finlocker-RG
+az aks get-credentials -n $baseline'aks' -g $baseline'-RG'
 
 # Cleanup. Delete the RG and Deployment
-az group delete -g 'finlocker-RG' -y
-az deployment sub delete -n 'FinDep'
+az group delete -g $baseline'-RG' -y
+az deployment sub delete -n $baseline'Dep'
