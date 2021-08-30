@@ -2,13 +2,22 @@ baseline='Contoso'
 location='westus'
 
 # Create Base64 script value
-cat script.sh | base64 >> script64.txt
+script64=$(cat script.sh | base64)
 
-# Create / Update the deployment
-az deployment sub create -n $baseline'Dep' -l $location -f main.bicep --parameters script64='...base64convertedfile value...'
+# Generate and SSH key pair to pass the public key as parameter
+ssh-keygen -m PEM -t rsa -b 4096 -C '' -f ./jbsshkey.pem
 
-# Attach ACR
-az aks update -n $baseline'aks' -g $baseline'-RG' --attach-acr 'qo4d2vcitdpwcacr'
+pubkeydata=$(cat jbsshkey.pem.pub)
+
+# Create / Update the deployment (replace AAD Group ID)
+az deployment sub create -n $baseline'Dep' -l $location -f main.bicep \
+    --parameters baseName=$baseline \
+    --parameters script64=$script64 \
+    --parameters pubkeydata=$pubkeydata \
+    --parameters aadGroupdIds='("e822cf30-7f5e-4968-a215-5cc48d538580")'
+
+# Attach ACR, grab the ACR name
+az aks update -n $baseline'aks' -g $baseline'-RG' --attach-acr '...ACR Name...'
 
 # Get AKS Credentials
 az aks get-credentials -n $baseline'aks' -g $baseline'-RG'
